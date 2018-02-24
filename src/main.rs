@@ -4,12 +4,11 @@ extern crate reqwest;
 extern crate serde_derive;
 extern crate serde_json;
 
-use std::process;
-
 use clap::App;
 use clap::ArgMatches;
+use reqwest::{Client, Response};
 use serde_json::Value;
-use reqwest::Client;
+use std::process;
 
 const ARG_JSON_URL: &str = "JSON URL";
 const ARG_USAGE: &str = "<JSON URL> JSON array contains a list of target URL to download";
@@ -38,13 +37,17 @@ fn parse_args() -> ArgMatches<'static> {
 }
 
 fn download_file_list(client: Client, json_url: &str) -> Vec<File> {
-    let mut response = match client.get(json_url).send() {
+    let response = match client.get(json_url).send() {
         Ok(response) => response,
         Err(e) => {
             println!("Invalid {}: {}\n{}", ARG_JSON_URL, json_url, e);
             process::exit(1);
         }
     };
+    return create_file_list(response);
+}
+
+fn create_file_list(mut response: Response) -> Vec<File> {
     let json_vec = match response.json() {
         Ok(Value::Array(list)) => list,
         Ok(_) => unreachable!(),
@@ -53,7 +56,7 @@ fn download_file_list(client: Client, json_url: &str) -> Vec<File> {
             process::exit(1);
         }
     };
-    // Convert Serde::Array to Vec<File>
+
     let mut file_list: Vec<File> = Vec::new();
     for (_, file_info) in json_vec.iter().enumerate() {
         let url = match file_info["url"] {
@@ -64,7 +67,8 @@ fn download_file_list(client: Client, json_url: &str) -> Vec<File> {
             Value::Number(ref size) => size,
             _ => unreachable!()
         }.as_u64().unwrap();
-        file_list.push(File { url: url.clone(), file_size })
+        file_list.push(File { url: url.clone(), file_size });
+        println!("{} {}", url, file_size);
     }
     return file_list;
 }
