@@ -2,7 +2,7 @@ use file::FileInfo;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use md5;
 use num_cpus;
-use reqwest::{Client, Response};
+use reqwest::Client;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -29,24 +29,30 @@ pub type Result<T> = result::Result<T, Error>;
 
 pub fn download_file_list(json_url: &str) -> Result<Vec<FileInfo>> {
     let client = Client::new();
-    let response = match client.get(json_url).send() {
+    let mut response = match client.get(json_url).send() {
         Ok(response) => response,
         Err(_) => return Err(Error::DownloadFail)
     };
-    return create_file_list(response);
-}
-
-fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
     let json_vec = match response.json() {
         Ok(Value::Array(list)) => list,
         Ok(_) | Err(_) => return Err(Error::InvalidResponse)
     };
+    return create_file_list(json_vec);
+}
 
+fn create_file_list(map_vec: Vec<Value>) -> Result<Vec<FileInfo>> {
     let mut file_list: Vec<FileInfo> = Vec::new();
-    for (_, file_info) in json_vec.iter().enumerate() {
-        let url = match file_info["url"] {
-            Value::String(ref url) => url,
-            _ => unreachable!()
+    for (_, file_info) in map_vec.iter().enumerate() {
+        let map = match file_info {
+            &Value::Object(ref map) => map,
+            _ => continue
+        };
+        let url = match map.get("url") {
+            Some(url) => match url {
+                &Value::String(ref url) => url,
+                _ => continue
+            },
+            _ => continue
         };
 
         let parsed_url = match Url::parse(&url) {
@@ -56,13 +62,19 @@ fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
         let paths = parsed_url.path_segments();
         let file_name = paths.unwrap().last().unwrap().to_owned();
 
-        let file_size = match file_info["size"] {
-            Value::Number(ref size) => size,
-            _ => unreachable!()
+        let file_size = match map.get("size") {
+            Some(size) => match size {
+                &Value::Number(ref size) => size,
+                _ => continue
+            },
+            _ => continue
         }.as_u64().unwrap();
         file_list.push(FileInfo { url: url.clone(), name: file_name, size: file_size });
     }
-    return Ok(file_list);
+    if file_list.len() == 0 {
+        return Err(Error::InvalidResponse);
+    }
+    Ok(file_list)
 }
 
 pub fn download_files(files: Vec<FileInfo>) {
@@ -93,8 +105,7 @@ pub fn download_files(files: Vec<FileInfo>) {
                     let mut data = Vec::with_capacity(file_size as usize);
                     if file.read_to_end(&mut data).is_ok() {
                         bar.finish_with_message(&format!("{:x}", md5::compute(data)));
-                    }
-                    else {
+                    } else {
                         bar.finish_with_message("Failed to compute MD5");
                     }
                 }
@@ -147,7 +158,6 @@ pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
             last_progress_time = now;
             bar.set_position(bytes_received);
         }
-
     }
     Ok(())
 }
@@ -163,5 +173,75 @@ fn create_file_with_size(file_path: &str, size: u64) -> Result<File> {
             Ok(file)
         }
         Err(_) => Err(Error::IoError)
+    }
+}
+
+use super::*;
+
+#[cfg(test)]
+mod test_create_file_list {
+    use super::*;
+
+    #[test]
+    fn no_data() {
+        let v: Vec<Value> = Vec::new();
+        let list = create_file_list(v);
+        assert!(list.is_err());
+    }
+
+    #[test]
+    fn only_url_data() {
+        let v = vec![
+            json!({"url": "http://aaa.bbb"}),
+            json!({"url": "http://ccc.ddd"}),
+        ];
+        let list = create_file_list(v);
+        assert!(list.is_err());
+    }
+
+    #[test]
+    fn only_size_data() {
+        let v = vec![
+            json!({"size": 123}),
+            json!({"size": 456}),
+        ];
+        let list = create_file_list(v);
+        assert!(list.is_err());
+    }
+
+    #[test]
+    fn invalid_data() {
+        let v = vec![
+            json!({"abc": "ddd"}),
+            json!({"efg": 123}),
+        ];
+        let list = create_file_list(v);
+        assert!(list.is_err());
+    }
+
+    #[test]
+    fn normal_data_with_url_and_size() {
+        let v = vec![
+            json!({"url": "http://aaa.bbb", "size": 123}),
+            json!({"url": "http://ccc.ddd", "size": 456}),
+        ];
+        let list = create_file_list(v);
+        assert!(list.is_ok());
+        let list = list.unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn partial_invalid_data() {
+        let v = vec![
+            json!({"url": "http://aaa.bbb", "size": 123}),
+            json!({"abc": "ddd"}),
+            json!({"url": "http://ccc.ddd", "size": 456}),
+            json!({"efg": 123}),
+        ];
+        let list = create_file_list(v);
+        assert!(list.is_ok());
+        let list = list.unwrap();
+        assert_eq!(list.len(), 2);
     }
 }
