@@ -1,5 +1,6 @@
 use file::FileInfo;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use md5;
 use num_cpus;
 use reqwest::{Client, Response};
 use serde_json::Value;
@@ -52,7 +53,7 @@ fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
 
         let parsed_url = match Url::parse(&url) {
             Ok(url) => url,
-            Err(_) => continue;
+            Err(_) => continue
         };
         let paths = parsed_url.path_segments();
         let file_name = paths.unwrap().last().unwrap().to_owned();
@@ -82,9 +83,18 @@ pub fn download_files(files: Vec<FileInfo>) {
 
         let cloned_file = file.clone();
         pool.execute(move || {
+            let file_name = cloned_file.name.clone();
+            let file_size = cloned_file.size;
             match download_file(cloned_file, &bar) {
                 Ok(_) => {
-                    // Download complete, calculate MD5
+                    let mut file = File::open(file_name).unwrap();
+                    let mut data = Vec::with_capacity(file_size as usize);
+                    if file.read_to_end(&mut data).is_ok() {
+                        bar.set_message(&format!("{:x}", md5::compute(data)));
+                    }
+                    else {
+                        bar.set_message("Failed to read file");
+                    }
                 }
                 Err(e) => {
                     println!("Download file failed: {:?}", e);

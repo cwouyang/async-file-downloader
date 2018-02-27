@@ -1,5 +1,6 @@
 extern crate clap;
 extern crate indicatif;
+extern crate md5;
 extern crate num_cpus;
 extern crate reqwest;
 #[macro_use]
