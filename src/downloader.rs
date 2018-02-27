@@ -39,8 +39,7 @@ pub fn download_file_list(json_url: &str) -> Result<Vec<FileInfo>> {
 fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
     let json_vec = match response.json() {
         Ok(Value::Array(list)) => list,
-        Ok(_) => unreachable!(),
-        Err(_) => return Err(Error::InvalidResponse)
+        Ok(_) | Err(_) => return Err(Error::InvalidResponse)
     };
 
     let mut file_list: Vec<FileInfo> = Vec::new();
@@ -49,7 +48,6 @@ fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
             Value::String(ref url) => url,
             _ => unreachable!()
         };
-        let cloned_url = url.clone();
 
         let parsed_url = match Url::parse(&url) {
             Ok(url) => url,
@@ -62,12 +60,16 @@ fn create_file_list(mut response: Response) -> Result<Vec<FileInfo>> {
             Value::Number(ref size) => size,
             _ => unreachable!()
         }.as_u64().unwrap();
-        file_list.push(FileInfo { url: cloned_url, name: file_name, size: file_size });
+        file_list.push(FileInfo { url: url.clone(), name: file_name, size: file_size });
     }
     return Ok(file_list);
 }
 
 pub fn download_files(files: Vec<FileInfo>) {
+    if files.len() == 0 {
+        println!("Empty file list");
+        return;
+    }
     let worker_count = num_cpus::get_physical();
     let pool = ThreadPool::new(worker_count);
     let mp = MultiProgress::new();
