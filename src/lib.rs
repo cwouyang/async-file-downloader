@@ -1,4 +1,5 @@
 extern crate clap;
+extern crate indicatif;
 extern crate num_cpus;
 extern crate reqwest;
 #[macro_use]
@@ -10,3 +11,4 @@ extern crate url;
 pub mod file;
 pub mod arg_parser;
 pub mod downloader;
+mod progressbar;

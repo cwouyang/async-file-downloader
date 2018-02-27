@@ -13,4 +13,3 @@ pub fn parse_args() -> ArgMatches<'static> {
         .args_from_usage(&ARG_USAGE)
         .get_matches();
 }
-
