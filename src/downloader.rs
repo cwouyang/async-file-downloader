@@ -78,7 +78,7 @@ pub fn download_files(files: Vec<FileInfo>) {
     for (_, file) in files.iter().enumerate() {
         let mut bar = ProgressBar::new(file.size);
         let style = ProgressStyle::default_bar()
-            .template(&format!("{} [{{elapsed_precise}}] {{bar:.{}}} {{bytes:>8}}/{{total_bytes:>8}} eta:{{eta:>4}} {{msg}}", file.name, "yello"))
+            .template(&format!("{:<12} [{{elapsed_precise}}] {{bar:.{}}} {{bytes:>8}}/{{total_bytes:>8}} eta:{{eta:>4}} {{msg}}", file.name, "yello"))
             .progress_chars("=> ");
         bar.set_style(style);
         bar = mp.add(bar);
@@ -92,14 +92,14 @@ pub fn download_files(files: Vec<FileInfo>) {
                     let mut file = File::open(file_name).unwrap();
                     let mut data = Vec::with_capacity(file_size as usize);
                     if file.read_to_end(&mut data).is_ok() {
-                        bar.set_message(&format!("{:x}", md5::compute(data)));
+                        bar.finish_with_message(&format!("{:x}", md5::compute(data)));
                     }
                     else {
-                        bar.set_message("Failed to read file");
+                        bar.finish_with_message("Failed to compute MD5");
                     }
                 }
                 Err(e) => {
-                    println!("Download file failed: {:?}", e);
+//                    println!("Download file failed: {:?}", e);
                 }
             }
         });
@@ -109,17 +109,24 @@ pub fn download_files(files: Vec<FileInfo>) {
 }
 
 pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
-    let mut file_writer = create_file_with_size(&file.name, file.size)?;
+    let client = Client::new();
+    let mut response = client.get(&file.url).send().unwrap();
+    bar.set_message("Downloading...");
+    let status = response.status();
+    if !status.is_success() {
+        // It seems to be a constrain that the call of finish() will result in the complete of
+        // progress bar, we set the length to 0 to present the failure of download here.
+        bar.set_length(0);
+        bar.finish_with_message(&format!("Response status: {:?}", status));
+        return Err(Error::InvalidResponse);
+    }
 
+    let mut file_writer = create_file_with_size(&file.name, file.size)?;
     let mut bytes_buffer = [0; DEFAULT_DOWNLOAD_BUFFER_BYTES];
     let mut bytes_received = 0;
     let mut first_byte_received = false;
     let progress_update_interval_millis: Duration = Duration::from_millis(PROGRESS_UPDATE_INTERVAL_MILLIS);
     let mut last_progress_time = Instant::now() - progress_update_interval_millis;
-
-    let client = Client::new();
-    let mut response = client.get(&file.url).send().unwrap();
-    bar.set_message("Downloading...");
     while let Ok(n) = response.read(&mut bytes_buffer) {
         if n == 0 {
             if !first_byte_received {
@@ -140,9 +147,8 @@ pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
             last_progress_time = now;
             bar.set_position(bytes_received);
         }
-        bar.inc(n as u64);
+
     }
-    bar.finish_with_message(&"Downloaded".to_owned());
     Ok(())
 }
 
