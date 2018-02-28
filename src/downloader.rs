@@ -18,6 +18,7 @@ const DEFAULT_DOWNLOAD_BUFFER_BYTES: usize = 1024 * 64;
 /// Constant to represent the refresh interval (in milliseconds) for the CLI
 const PROGRESS_UPDATE_INTERVAL_MILLIS: u64 = 1000;
 
+/// Error represents the errors which might occur when downloading a file.
 #[derive(Debug)]
 pub enum Error {
     InvalidUrl,
@@ -28,6 +29,8 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
+/// Given a URL, download_file_list download a JSON file containing a list of files and parses the
+/// list into a vector of FileInfo
 pub fn download_file_list(json_url: &str) -> Result<Vec<FileInfo>> {
     let client = Client::new();
     let mut response = match client.get(json_url).send() {
@@ -41,6 +44,10 @@ pub fn download_file_list(json_url: &str) -> Result<Vec<FileInfo>> {
     return create_file_list(json_vec);
 }
 
+/// create_file_list converts a vector of map into a vector of FileInfo.
+/// A valid map should contain at least following two keys: "url" and "size". If not, it will be
+/// ignored.
+/// Example map: {"url": "https://sample.url", "size": 123}
 fn create_file_list(map_vec: Vec<Value>) -> Result<Vec<FileInfo>> {
     let mut file_list: Vec<FileInfo> = Vec::new();
     for (_, file_info) in map_vec.iter().enumerate() {
@@ -78,6 +85,8 @@ fn create_file_list(map_vec: Vec<Value>) -> Result<Vec<FileInfo>> {
     Ok(file_list)
 }
 
+/// download_files downloads several files in parallel and updates the download progress in console.
+/// Each file uses one thread and total number of threads is up to the number of CPU.
 pub fn download_files(files: Vec<FileInfo>) {
     if files.len() == 0 {
         println!("Empty file list");
@@ -111,7 +120,9 @@ pub fn download_files(files: Vec<FileInfo>) {
     pool.join();
 }
 
-pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
+/// download_file downloads a file and updates the download progress according to the bytes
+/// downloaded.
+fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
     let client = Client::new();
     let mut response = client.get(&file.url).send().unwrap();
     bar.set_message("Downloading...");
@@ -154,11 +165,10 @@ pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
     Ok(())
 }
 
+/// create_file_with_size opens a File handle with storage pre-allocated.
 fn create_file_with_size(file_path: &str, size: u64) -> Result<File> {
     let path = Path::new(file_path);
-    if path.exists() {
-//        println!("The path to store {} already exists! Overwrite it.", file_path);
-    }
+    // Overwrite existing file.
     match File::create(path) {
         Ok(file) => {
             file.set_len(size).expect("Cannot extend file to download size!");
