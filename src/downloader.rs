@@ -1,7 +1,8 @@
 use file::FileInfo;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar};
 use md5;
 use num_cpus;
+use progressbar;
 use reqwest::Client;
 use serde_json::Value;
 use std::fs::File;
@@ -88,34 +89,25 @@ pub fn download_files(files: Vec<FileInfo>) {
 
     println!("Start downloading files with {} threads", worker_count);
     for (_, file) in files.iter().enumerate() {
-        let mut bar = ProgressBar::new(file.size);
-        let style = ProgressStyle::default_bar()
-            .template(&format!("{:<12} [{{elapsed_precise}}] {{bar:.{}}} {{bytes:>8}}/{{total_bytes:>8}} eta:{{eta:>4}} {{msg}}", file.name, "yello"))
-            .progress_chars("=> ");
-        bar.set_style(style);
+        let mut bar = progressbar::new(file.name.clone(), file.size);
         bar = mp.add(bar);
 
         let cloned_file = file.clone();
         pool.execute(move || {
             let file_name = cloned_file.name.clone();
             let file_size = cloned_file.size;
-            match download_file(cloned_file, &bar) {
-                Ok(_) => {
-                    let mut file = File::open(file_name).unwrap();
-                    let mut data = Vec::with_capacity(file_size as usize);
-                    if file.read_to_end(&mut data).is_ok() {
-                        bar.finish_with_message(&format!("{:x}", md5::compute(data)));
-                    } else {
-                        bar.finish_with_message("Failed to compute MD5");
-                    }
-                }
-                Err(e) => {
-//                    println!("Download file failed: {:?}", e);
+            if download_file(cloned_file, &bar).is_ok() {
+                let mut file = File::open(file_name).unwrap();
+                let mut data = Vec::with_capacity(file_size as usize);
+                if file.read_to_end(&mut data).is_ok() {
+                    bar.finish_with_message(&format!("{:x}", md5::compute(data)));
+                } else {
+                    bar.finish_with_message("Failed to compute MD5");
                 }
             }
         });
     }
-    mp.join();
+    mp.join().unwrap();
     pool.join();
 }
 
@@ -137,7 +129,7 @@ pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
     let mut bytes_received = 0;
     let mut first_byte_received = false;
     let progress_update_interval_millis: Duration = Duration::from_millis(PROGRESS_UPDATE_INTERVAL_MILLIS);
-    let mut last_progress_time = Instant::now() - progress_update_interval_millis;
+    let mut last_progress_update_time = Instant::now() - progress_update_interval_millis;
     while let Ok(n) = response.read(&mut bytes_buffer) {
         if n == 0 {
             if !first_byte_received {
@@ -154,8 +146,8 @@ pub fn download_file(file: FileInfo, bar: &ProgressBar) -> Result<()> {
         bytes_received = bytes_received + n as u64;
 
         let now = Instant::now();
-        if now.duration_since(last_progress_time) > progress_update_interval_millis {
-            last_progress_time = now;
+        if now.duration_since(last_progress_update_time) > progress_update_interval_millis {
+            last_progress_update_time = now;
             bar.set_position(bytes_received);
         }
     }
@@ -175,8 +167,6 @@ fn create_file_with_size(file_path: &str, size: u64) -> Result<File> {
         Err(_) => Err(Error::IoError)
     }
 }
-
-use super::*;
 
 #[cfg(test)]
 mod test_create_file_list {
